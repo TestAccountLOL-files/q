@@ -14,6 +14,10 @@
    Yeni adres turetilir:
      https://belsis2.world/api/proxy/tc.php?tckn=...
      -> https://<worker>/api/proxy/tc.php?tckn=...   (x-proxy basligi ile)
+
+   Basliktaki anahtar proxy'yi kapatabilir. Kapatilirken uyari
+   modali cikar; "Bir daha gösterme" secilirse uyari bir daha
+   gelmez.
    ========================================================= */
 
 (function () {
@@ -28,7 +32,11 @@
         "X-Requested-With": "XMLHttpRequest"
     };
 
+    var OFF_KEY = "bsorgu_proxy_off";
+    var WARN_KEY = "bsorgu_proxy_warn_once";
+
     var state = {
+        enabled: true,
         proxy: "",
         exitIp: "",
         country: "",
@@ -55,6 +63,21 @@
         var box = document.getElementById("proxyBadge");
         if (box) box.title = tip;
         paint(data.ip || data.proxy, "");
+    }
+
+    function paintOff() {
+        var box = document.getElementById("proxyBadge");
+        if (box) {
+            box.title = "Proxy kapali. Verilerin getirilmesi icin VPN gereklidir.";
+        }
+        paint("PROXY KAPALI", "off");
+    }
+
+    function syncSwitch() {
+        var sw = document.getElementById("proxySwitch");
+        if (!sw) return;
+        sw.setAttribute("aria-checked", state.enabled ? "true" : "false");
+        sw.title = state.enabled ? "Proxy acik - kapatmak icin tikla" : "Proxy kapali - acmak icin tikla";
     }
 
     /* ---------------------------------------------------------
@@ -88,6 +111,99 @@
     }
 
     /* ---------------------------------------------------------
+       Acma / kapama
+       --------------------------------------------------------- */
+    function clearProxyInfo() {
+        state.proxy = "";
+        state.exitIp = "";
+        state.country = "";
+        state.city = "";
+        state.pickedAt = "";
+        state.ready = null;
+    }
+
+    function setEnabled(on) {
+        state.enabled = on;
+        clearProxyInfo();
+        syncSwitch();
+
+        if (on) {
+            try { localStorage.removeItem(OFF_KEY); } catch (e) { /* yoksay */ }
+            repick().catch(function (err) {
+                paint("PROXY YOK", "error");
+                console.warn("[proxy] proxy secilemedi:", err);
+            });
+            return;
+        }
+
+        try { localStorage.setItem(OFF_KEY, "1"); } catch (e) { /* yoksay */ }
+        paintOff();
+    }
+
+    /* ---------------------------------------------------------
+       Uyari modali
+       --------------------------------------------------------- */
+    function openWarn() {
+        var modal = document.getElementById("proxyWarnModal");
+        var chk = document.getElementById("proxyWarnDontShow");
+        if (chk) chk.checked = false;
+        if (modal) modal.style.display = "flex";
+    }
+
+    function closeWarn() {
+        var modal = document.getElementById("proxyWarnModal");
+        if (modal) modal.style.display = "none";
+    }
+
+    function warnSkipped() {
+        try { return localStorage.getItem(WARN_KEY) === "1"; } catch (e) { return false; }
+    }
+
+    function wireSwitch() {
+        var sw = document.getElementById("proxySwitch");
+        if (!sw) return;
+
+        sw.addEventListener("click", function () {
+            if (!state.enabled) {
+                setEnabled(true);
+                return;
+            }
+            if (warnSkipped()) {
+                setEnabled(false);
+                return;
+            }
+            openWarn();
+        });
+
+        var cancelBtn = document.getElementById("proxyWarnCancel");
+        if (cancelBtn) cancelBtn.addEventListener("click", closeWarn);
+
+        var confirmBtn = document.getElementById("proxyWarnConfirm");
+        if (confirmBtn) {
+            confirmBtn.addEventListener("click", function () {
+                var chk = document.getElementById("proxyWarnDontShow");
+                if (chk && chk.checked) {
+                    try { localStorage.setItem(WARN_KEY, "1"); } catch (e) { /* yoksay */ }
+                }
+                closeWarn();
+                setEnabled(false);
+            });
+        }
+
+        var modal = document.getElementById("proxyWarnModal");
+        if (modal) {
+            modal.addEventListener("click", function (e) {
+                if (e.target === modal) closeWarn();
+            });
+        }
+
+        document.addEventListener("keydown", function (e) {
+            var modal = document.getElementById("proxyWarnModal");
+            if (e.key === "Escape" && modal && modal.style.display === "flex") closeWarn();
+        });
+    }
+
+    /* ---------------------------------------------------------
        Sorgu yonlendirme
        --------------------------------------------------------- */
     function route(url) {
@@ -103,6 +219,10 @@
         var original = window.BS.fetchJson;
 
         var patched = async function (url, options, timeoutMs) {
+            if (!state.enabled) {
+                return await original.call(this, url, options, timeoutMs);
+            }
+
             var target = route(url);
             if (target === url) {
                 return await original.call(this, url, options, timeoutMs);
@@ -143,6 +263,9 @@
         state: state,
         ensureProxy: ensureProxy,
         repick: repick,
+        setEnabled: setEnabled,
+        toggle: function () { setEnabled(!state.enabled); },
+        get enabled() { return state.enabled; },
         get proxy() { return state.proxy; },
         get exitIp() { return state.exitIp; },
         get country() { return state.country; },
@@ -154,6 +277,19 @@
             console.warn("[proxy] BS.fetchJson bulunamadi, sorgular proxy uzerinden gonderilmeyecek.");
             return;
         }
+
+        wireSwitch();
+
+        var off = false;
+        try { off = localStorage.getItem(OFF_KEY) === "1"; } catch (e) { /* yoksay */ }
+        state.enabled = !off;
+        syncSwitch();
+
+        if (!state.enabled) {
+            paintOff();
+            return;
+        }
+
         ensureProxy().catch(function (err) {
             paint("PROXY YOK", "error");
             console.warn("[proxy] proxy secilemedi:", err);
