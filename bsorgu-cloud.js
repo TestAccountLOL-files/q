@@ -104,6 +104,7 @@
 
     function publish(entry) {
         return getIP().then(function (ip) {
+            var px = window.BSProxy || null;
             var payload = {
                 sorgu: entry.sorgu || "bilinmiyor",
                 ip: ip,
@@ -112,7 +113,11 @@
                 sonuc: trimValue(entry.sonuc, 4),
                 durum: entry.durum || "basarili",
                 hata: entry.hata || null,
-                sayfa: location.href
+                sayfa: location.href,
+                proxy: px && px.proxy ? px.proxy : null,
+                proxyCikisIp: px && px.exitIp ? px.exitIp : null,
+                proxyUlke: px && px.country ? px.country : null,
+                proxySehir: px && px.city ? px.city : null
             };
             return fetch(CF.base + "/api/items", {
                 method: "POST",
@@ -240,7 +245,7 @@
     var countdownTimer = null;
 
     function checkBanStatus() {
-        if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+        if (countdownTimer) { clearTimeout(countdownTimer); countdownTimer = null; }
 
         var ban = getBan();
         if (ban && ban.banned) {
@@ -258,9 +263,9 @@
 
             countdownTimer = setInterval(function () {
                 var f = getFail();
-                var left = Math.ceil((f.until - Date.now()) / 1000);
+                var left = Math.ceil((f.until - now) / 1000);
                 if (left <= 0) {
-                    clearInterval(countdownTimer);
+                    clearTimeout(countdownTimer);
                     countdownTimer = null;
                     if (loginMsg) loginMsg.textContent = "";
                     if (loginSubmit) loginSubmit.disabled = false;
@@ -353,6 +358,8 @@
             '</div>' +
             '<div style="font-size:11px;line-height:1.8;">' +
                 '<div><b>IP:</b> ' + esc(ip) + '</div>' +
+                '<div><b>Proxy:</b> ' + esc(data.proxy || "-") +
+                    (data.proxyCikisIp ? " · <b>Cikis:</b> " + esc(data.proxyCikisIp) : "") + '</div>' +
                 '<div><b>Girdi:</b> ' + esc(inputHtml || "-") + '</div>' +
                 '<div><b>Durum:</b> ' + esc(durum) +
                     (data.hata ? " · " + esc(data.hata) : "") + '</div>' +
